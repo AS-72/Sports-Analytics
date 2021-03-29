@@ -1,0 +1,405 @@
+---
+title: "F1 Racing Data Assembly and Analysis"
+author: "Anthony Stachowski, Brian Krupa, Rory Kelly"
+date: "4/27/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Notes on the Race Data:
+
+A few notes on this data file, it is an assmebly of multiple data files from http://ergast.com/mrd/.  There is lots of data summarized in this file and not all will be necessary for analysis.  There is another key file on lap time information that may also be useful, but was not included in this summary file due to the size of that file.
+
+The file contains information for each race from 1950 - 2019 that had information.
+
+In some cases there was missing data when assembling different tables and these are indicated by blanks in the CSV file.  For example, for certain races there was no information on qualifying times.  It does not mean that qualifying did not occur, but rather that the data was not stored.
+
+In other instances, a `"\N"` is indicated in the dataset to show that the data was recorded, but for some reason was not included.  This could be due to the data not being valid for a certain category (for example, some qualifying rounds do not include data because the driver was not eligible for that round) or could possibly indicate that there were multiple values that could have been provided for one variable.
+
+In addition to the files that were brought together from the above data source, we added some circuit classification fields to these files based on information about the circuits from the following wikipedia page: https://en.wikipedia.org/wiki/List_of_Formula_One_circuits.
+
+The classification is street, road, and race.  Street circuits are held on closed streets.  Road circuits are held on a mixture of public roads and a permanent track.  Race circuits are held at permanent facilities.  Fianally, we added an additional category: temporary circuits, which are ones that have had 3 or less races in the history of Formula 1 from 1950-2019.  The classification based on the three categories and the classification based on the four categories will both be evaluated.
+
+Additional columns were added to the information from the F1 data site to capture a performance analysis for evaluating the relative competitiveness of each race event.  This was built considering a driver's relative performance (i.e. driver finishing position divided by the number of drivers in the field) and their history at the circuit.  Two measures were considered: (1) lagged average and (2) total average.  The **lagged** average considered only the driver's previous performance at the track.  For example, if we are looking at Hamilton at the Monaco Grand Prix in the 2009 season, the competitiveness rating would only be determined by his relative performance at previous Monaco Grand Prix races.  The **total** average considers all of the driver's races at the given track regardless of the season.  Back to the Hamilton example, the total average would consider his relative perfromance at the 2009 race and all other Monaco Grand Prix races up until the end of the data collection period (i.e. 2019).  There are benefits and drawbacks to both versions.
+
+A similar calculation was done to assess the relative competitiveness of each race at the constructor level.  The calculation was adjusted to account for the fact that constructors can utilize two cars per race.
+
+A calculated points column was also built for the data set.  Point structures have changed over time and therefore a consistent measure was chosen to assess driver and constructor performance.  This calculation uses the point system from 1991-2002 as a starting point and then adds an additional mechanism for assigning points to every finishing position (which is different from F1 point structuring).  The points are scored as follows: 1st place, 10 points; 2nd place, 6 points; 3rd place, 4 points; 4th place, 3 points; 5th place, 2 points; 6th place, 1 point; and 7th place and lower, $$(0.1^2)^{(position-6)}$$.  These additional points are small enough (begin at 0.01 and proceed lower) that they should not distort results while also assessing performance over time.
+
+## Importing the First Dataset:
+
+```{r Data Import, warning=FALSE, message=FALSE}
+library(readr)
+
+data_url = "https://github.com/AS-72/Sports-Analytics/blob/master/f1RacingDataAggregation.csv?raw=true"
+
+f1Racing = read_csv(data_url)
+
+```
+
+Summarizing and viewing some of the data:
+
+```{r Data View, warning=FALSE, message=FALSE}
+library(dplyr)
+
+glimpse(f1Racing)
+
+```
+
+## Data Cleaning:
+
+Claeaning and selecting pertinent information from the above dataset for initial analysis:
+
+```{r Data Cleaning}
+
+# Selecting the columns needed, by removing ones that are not needed for this analysis:
+selectData = f1Racing %>%
+  dplyr::select(-number, -position, -positionText, -laps, -time, -milliseconds, -fastestLap, -rank, -fastestLapTime,
+         -fastestLapSpeed, -date, -time_1, -nationality, -carNumber, -forename, -surname, -dob, -nationality_1,
+         -qualifiedPosition, -q1, -q2, -q3, -totalPitStops, -totalPitDuration, -totalPitMiliseconds, 
+         -constructorPosition, -constructorPositionText, -constructorWins)
+
+# Changing the variable types:
+selectData$resultId = as.factor(selectData$resultId)
+selectData$raceId = as.factor(selectData$raceId)
+selectData$driverId = as.factor(selectData$driverId)
+selectData$constructorId = as.factor(selectData$constructorId)
+selectData$startingGrid = as.ordered(selectData$startingGrid)
+selectData$finishingPosition = as.ordered(selectData$finishingPosition)
+selectData$statusId = as.factor(selectData$statusId)
+selectData$round = as.ordered(selectData$round)
+selectData$circuitId = as.factor(selectData$circuitId)
+selectData$classification_1 = as.factor(selectData$classification_1)
+selectData$classification_2 = as.factor(selectData$classification_2)
+selectData$classification_3 = as.factor(selectData$classification_3)
+selectData$code = as.factor(selectData$code)
+selectData$finishingStatus = as.factor(selectData$finishingStatus)
+
+# Renaming columns and creating numeric finishing position variable:
+selectData = selectData %>%
+  rename(grandPrixName = name, circuitName = name_1, constructorName = name_2, driverNameCode = code) %>%
+  mutate(finishingNumber = as.numeric(finishingPosition)) %>%
+  mutate(yearCategory = as.factor(year))
+
+summary(selectData)
+
+```
+## Data Exploration and Visualization:
+
+```{r Exploration and Visualization, message=FALSE}
+
+library(ggplot2)
+
+# Number of drivers by season:
+selectData %>%
+  group_by(year) %>%
+  summarise(count = n_distinct(driverId)) %>%
+  ggplot(., aes(x = year, y = count)) +
+  geom_line(color = "blue3") +
+  theme_minimal() +
+  ylab("driver count")
+
+# Number of constructors by season:
+selectData %>%
+  group_by(year) %>%
+  summarise(count = n_distinct(constructorId)) %>%
+  ggplot(., aes(x = year, y = count)) +
+  geom_line(color = "blue3") +
+  theme_minimal() +
+  ylab("constructor count")
+
+# Number of circuits with specific classification_1:
+selectData %>%
+  group_by(circuitId, classification_1) %>%
+  summarise(count = n_distinct(raceId)) %>%
+  ggplot(., aes(x = classification_1)) + 
+  geom_bar(fill = "blue3") +
+  theme_minimal() +
+  ylab("circuit count")
+
+# Number of events by circuit style:
+selectData %>%
+  group_by(raceId, classification_1) %>%
+  summarise(count = n()) %>%
+  ggplot(., aes(x = classification_1)) + 
+  geom_bar(fill = "blue3") +
+  theme_minimal() +
+  ylab("event count")
+
+# Number of constructors and drivers since 1981:
+selectData %>%
+  filter(year >= 1981) %>%
+  summarise(drivers = n_distinct(driverId), constructors = n_distinct(constructorId))
+
+# Wins by driver since 1981:
+selectData %>%
+  filter(calculatedPoints == 10, year >= 1981) %>%
+  group_by(driverRef, driverId) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count))
+
+# Wins by constructor since 1981:
+selectData %>%
+  filter(calculatedPoints == 10, year >= 1981) %>%
+  group_by(constructorName, constructorId) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count))
+
+# Mean Competitiveness Measure:
+selectData %>%
+  summarise(meanTrailingDriver = mean(eventTrailingCompetitivenessDriver), 
+            meanTotalDriver = mean(eventCompetitivenessDriver),
+            meanTralingConstructor = mean(eventTrailingCompetitivenessConstructor), 
+            meanTotalConstructor = mean(eventCompetitivenessConstructor)) %>%
+  print(meanTrailingDriver,
+        meanTotalDriver,
+        meanTrailingConstructor,
+        meanTotalConstructor)
+
+# Standard Deviation of competitivness measure:
+selectData %>%
+  summarise(sdTrailingDriver = sd(eventTrailingCompetitivenessDriver), 
+            sdTotalDriver = sd(eventCompetitivenessDriver),
+            sdTralingConstructor = sd(eventTrailingCompetitivenessConstructor), 
+            sdTotalConstructor = sd(eventCompetitivenessConstructor)) %>%
+  print(sdTrailingDriver,
+        sdTotalDriver,
+        sdTrailingConstructor,
+        sdTotalConstructor)
+
+```
+
+### Change of 1981:
+
+In the year 1981, F1 racing set newly organized standards that created a new era for racing.  Regulations were put into place around constructors fielding vehicles and sponsoring drivers, which brought about significant changes.  This can be seen in the graph that counted the number of unique drivers by season.  After 1981, there has been a more consistent number of drivers per season.  More consistency developed even moreso in the early 2000s around driver and constructor counts.  However, we need to balance this consistency with ensuring that we have enough data points. Therefore, we will focus on analyzing performance for the 1981 season through the 2019 season.  
+
+## Aggregate Information by Constructor:
+
+We are concentrating on analyzing constructor performance to assess constructor dominance by circuit class.  The following file is a development from the *f1Racing* set above with data aggregated to the *raceId* and *constructorId* level.  Each row of data represents the performance by race for each participating constructor.  This aggregation was done in Excel and saved as a separate CSV fle.  The file also includes a *finishingGroup* level (1-4) based on the constructors finishing points relative to other constructors in each race event.  Level 1 corresponds to finishing in the top 20% of constructors for the race event.  Level 2 corresponds to finishing in the next 30% of constructors.  Level 3 is the following 30% and finally level 4 is finishing in the bottom 20% of constructors at the race event.
+
+Bringing the data into R:
+
+```{r Constructor Data Set, message=FALSE, warning=FALSE}
+
+constructor_data_url = "https://github.com/AS-72/Sports-Analytics/blob/master/f1RacingDataConstructor.csv?raw=true"
+
+f1Constructor = read_csv(constructor_data_url)
+```
+
+Summarizing the data within the above file:
+
+```{r Constructor Data View}
+
+glimpse(f1Constructor)
+```
+
+Adjusting some of the data types for various variables:
+```{r Constructor Data Cleaning}
+
+# Changing the variable types:
+f1Constructor$raceId = as.factor(f1Constructor$raceId)
+f1Constructor$constructorId = as.factor(f1Constructor$constructorId)
+f1Constructor$circuitId = as.factor(f1Constructor$circuitId)
+f1Constructor$yearCategory = as.factor(f1Constructor$year)
+f1Constructor$constructorName = as.factor(f1Constructor$constructorName)
+f1Constructor$circuitName = as.factor(f1Constructor$circuitName)
+f1Constructor$circuitClass1 = as.factor(f1Constructor$circuitClass1)
+f1Constructor$circuitClass2 = as.factor(f1Constructor$circuitClass2)
+f1Constructor$circuitClass3 = as.factor(f1Constructor$circuitClass3)
+f1Constructor$location = as.factor(f1Constructor$location)
+f1Constructor$country = as.factor(f1Constructor$country)
+f1Constructor$firstPlace = as.factor(f1Constructor$firstPlace)
+f1Constructor$secondPlace = as.factor(f1Constructor$secondPlace)
+f1Constructor$thirdPlace = as.factor(f1Constructor$thirdPlace)
+f1Constructor$finishingNumberCategory = as.ordered(f1Constructor$finishingNumber)
+f1Constructor$finishingGroup = as.ordered(f1Constructor$finishingGroup)
+
+summary(f1Constructor)
+```
+
+As there have been 66 constructors since 1981, this would mean that a regression model would require that there are 65 dummy variables.  Certain simulation models may be able to handle this many dummy variables given the possibility of resampling to create larger data sets, but these models are complex and we are attempting to build something a little simpler that will give an indication as to whether certain constructors perform better at certain circuit classes.  Therefore, we will group some constructors and while we will lose some descriptive value to our model, we should be able to still assess relative performance by constructor group.
+
+In order to do this grouping, we will focus on isolating constructors who have the most wins since 1981 as this indicates that they likely play a key role in circuit dominance.  We will focus on isolating the following constructors: Ferrari (159 wins), McLaren (158), Williams (103), Mercedes (93), and Red Bull (62).  The remaining constructors will be grouped together (101 wins in total).
+
+```{r Constructor Grouping}
+
+# Creating a table for looking up constructor IDs and allowing for the constructor name to be assigned:
+lookupTable = data.frame(constructorId = c("6","1","3","131","9"), 
+                         constructorGroup = c('Ferrari', 'McLaren', 'Williams','Mercedes','Red Bull'))
+
+f1Constructor = merge(f1Constructor, lookupTable, by = "constructorId", all = TRUE, all.x = TRUE)
+
+f1Constructor = f1Constructor %>%
+  mutate(constructorGroup = as.factor(ifelse(is.na(constructorGroup), "Other", as.character(constructorGroup))))
+```
+
+Creating a number of binary variables to allow for ease of review as the model is constructed:
+```{r Creation of Binary Variables}
+
+f1Constructor = f1Constructor %>%
+  mutate(race = as.factor(ifelse(circuitClass1 == "Race",1,0))) %>%
+  mutate(street = as.factor(ifelse(circuitClass1 == "Street",1,0))) %>%
+  mutate(road = as.factor(ifelse(circuitClass1 == "Road",1,0))) %>%
+  mutate(temporary = as.factor(ifelse(circuitClass1 == "Temporary",1,0))) %>%
+  mutate(ferrari = as.factor(ifelse(constructorGroup == "Ferrari",1,0))) %>%
+  mutate(mclaren = as.factor(ifelse(constructorGroup == "McLaren",1,0))) %>%
+  mutate(williams = as.factor(ifelse(constructorGroup == "Williams",1,0))) %>%
+  mutate(mercedes = as.factor(ifelse(constructorGroup == "Mercedes",1,0))) %>%
+  mutate(redbull = as.factor(ifelse(constructorGroup == "Red Bull",1,0)))
+
+```
+
+
+## Building an Ordinal Logistic Model for Constructor Performance:
+
+Using MASS library's polr to create an ordinal logistic model using the finishingGroup as the dependent variable.  As mentioned above, this is an ordinal level finishing group based on how the constructor finished in relation to other constructors in the race event.
+
+```{r Ordinal Logistic Regression Model}
+
+finish1 = MASS::polr(finishingGroup ~ ferrari + mercedes + mclaren + williams + redbull 
+                     + race + road + street +
+                     + year, 
+              data = f1Constructor,
+              Hess = TRUE,
+              method = "logistic")
+
+
+summary(finish1)
+```
+
+### Assessing the model by calculating p-values and other pertinent information:
+
+```{r Model Variable Tables}
+# Generate a table of coefficients from model:
+coefTable = coef(summary(finish1))
+
+# Generate p-values for the model:
+pValues = pnorm(abs(coefTable[, "t value"]), lower.tail = FALSE) * 2
+
+# Generate combined table of coefficients and p-values:
+coefTable = cbind(coefTable, "p value" = pValues)
+print(coefTable)
+
+# Generate confidence intervals:
+confidenceIntervals = confint.default(finish1)
+
+# Computing odds ratios:
+modelOddsRatioTable = exp(cbind(OddsRatio = coef(finish1), confidenceIntervals))
+print(modelOddsRatioTable)
+```
+
+Based on this information all of the constructor groupings are significant.  Only the intercept and road-class circuit were found to be significant.  The year variable is also significant.
+
+### Proportional Odds Assumption
+
+When building ordinal logistic regression models an important assumption to consider is the proportional odds assumption or parallel regression assumption.  This assumption states that the coefficients of the variables that explain the difference between one level of the dependent variable should be the same as the coefficients that explain the difference between another level.
+
+If this was not the case, the model would need different coefficients for assessing one level of the dependent variable versus another.  This can be tested visually by creating a plot that shows predictions based on the logit model for the outcome being greater than or equal to the levels of the dependent variable while varying each level of the independent variable.   If this assumption holds, we would expect to see the points in the plot to line up for each variable.  We follow a similar process to what is outlined on the following UCLA Statistical Consulting site: https://stats.idre.ucla.edu/r/dae/ordinal-logistic-regression/.
+
+Create a function and table to evaluate log odds at each level of the dependent variable while varying levels of the independent variable:
+```{r Proportional Odds 1st Step, message=FALSE}
+library(Hmisc)
+
+sf = function(y) {
+  c('Y>=1' = qlogis(mean(y >= 1)),
+    'Y>=2' = qlogis(mean(y >= 2)),
+    'Y>=3' = qlogis(mean(y >= 3)),
+    'Y>=4' = qlogis(mean(y >= 4)))
+}
+
+s = with(f1Constructor, summary(as.numeric(finishingGroup) ~ ferrari + mercedes + mclaren + williams + redbull 
+                     + race + road + street
+                     + year, 
+                     fun=sf))
+print(s)
+```
+
+We can look at differences by level for one variable:
+```{r Examining One Variable}
+
+roadTest1 = glm(I(as.numeric(finishingGroup) >= 2) ~ road, family="binomial", data = f1Constructor)
+summary(roadTest1)
+
+roadTest2 = glm(I(as.numeric(finishingGroup) >= 3) ~ road, family="binomial", data = f1Constructor)
+summary(roadTest2)
+
+roadTest3 = glm(I(as.numeric(finishingGroup) >= 4) ~ road, family="binomial", data = f1Constructor)
+summary(roadTest3)
+
+```
+
+From this, one can idetify elements of the table that was shown above prior to the GLM output.  For example, looking at the GLM output from finishingGroup >= 4, we see that the intercept is -1.27003, which corresponds to the table above Road 0 and Y>=4.  Road 1 and Y>=4 is -1.232 which is -1.27003 plus the coefficient for Road1 from the GLM output, 0.03789.  Putting this all together we can generate the following table:
+
+```{r Proportional Odds 2nd Step}
+
+s[, 5] = s[, 5] - s[, 4] - s[, 3]
+s[, 4] = s[, 4] - s[, 4]
+s[, 3] = s[, 3] - s[, 3]
+
+print(s)
+```
+
+Now we can generate a visual to show whether the proportional odds assumption holds.  If it holds, we would expect to see all of the points for each variable to lineup vertically.
+
+```{r Proportinal Odds Assumption 3rd Step}
+
+plot(s, which=1:4, pch=1:3, xlab='logit', main=' ', xlim=range(s[,3:5]))
+
+```
+
+There does appear to be some issues with some of the constructor variables and therefore calls this assumption into question.  However, even though this can be problematic, it also reveals some important information about these constructors.  Ferrari, Mercedes, McLaren, and Williams have dominated F1 racing for much of its history.  Therefore, it is somewhat reasonable to think that the coefficients for estimating probabilities at different finishing levels would actually be different.  While there are some issues around constructors, the circuit classes and years look to hold to the assumption, for the most part.
+
+### Generating Probabilities based on Model:
+
+While there appear to be some issues in regard to the proportional odds assumption, certain variables were indicated to have a significant effect on finishing group.  We will now translate the log odds from the model into probabilities and capture them in a table that accounts for every variable difference from the model:
+
+```{r Constructing a Probability Table}
+
+constructorCircuit <- data.frame(
+  ferrari = rep(c("1","0","0","0","0","0"), 936),
+  mercedes = rep(c("0","1","0","0","0","0"), 936),
+  mclaren = rep(c("0","0","1","0","0","0"), 936),
+  williams = rep(c("0","0","0","1","0","0"), 936),
+  redbull = rep(c("0","0","0","0","1","0"), 936),
+  race = rep(c("1","0","0","0"), each = 6),
+  road = rep(c("0","1","0","0"), each = 6),
+  street = rep(c("0","0","1","0"), each = 6),
+  year = rep(seq(from = 1981, to = 2019, by = 1), each = 24))
+
+constructorCircuit <- cbind(constructorCircuit, predict(finish1, constructorCircuit, type = "probs"))
+
+##show first few rows
+head(constructorCircuit)
+```
+
+```{r Pivoting the Probability Table}
+## Take the probability columns from above table and pivot longer:
+
+longConstructorCircuit <- reshape2::melt(constructorCircuit, 
+                               id.vars = c("ferrari", "mercedes", "mclaren","williams","redbull","race","road","street","year"),
+                               variable.name = "finishingGroup", 
+                               value.name = "probability")
+
+## View first few rows
+head(longConstructorCircuit)
+```
+
+Visualizing some of the output from the model based on proabilities:
+```{r}
+# Considering the above table, the following creates a visual that assesses difference in performance by constructor:
+
+longConstructorCircuit %>%
+  filter((ferrari == "1" | mclaren == "1" | williams == "1" | mercedes == "1") & road == "1") %>%
+  ggplot(., aes(x = year, y = probability, color = finishingGroup)) +
+  geom_line() +
+  facet_grid(~ ferrari ~ mclaren ~ williams ~ mercedes, labeller="label_both")
+```
+
+Additional analyses were constrcucted by taking this table and writing a CSV file to then assess information in Excel.  This analysis is included in the paper and presentation part of our report.
+
+### Conclusion
+While the above model certainly has shortcomings, it did provide some indication through a regression model that there are differences in performance by circuit class.  Therefore, this provides support for the an idea that many within F1 Racing have held that certain constructors are able to leverage expertise to build dominant cars at circuits.  These cars may even be more important than the driver behind the wheel.
+
