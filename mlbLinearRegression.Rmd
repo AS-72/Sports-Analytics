@@ -1,0 +1,73 @@
+---
+title: "MLB Run Projection - HW#2, Question 2"
+author: "Anthony Stachowski, Brian Krupa, Rory Kelly"
+date: "4/4/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Read in CSV file containing data on 2019 MLB Season
+File is stored at Github
+
+```{r, message=FALSE}
+
+library(readr)
+
+urlfile = "https://raw.githubusercontent.com/AS-72/Sports-Analytics/master/MLB_Team_Data_2019.csv"
+
+              
+mlb_2019_data <- read_csv(urlfile, col_names = TRUE)
+
+mlb_2019_data$Tm = as.factor(mlb_2019_data$Tm)
+
+head(mlb_2019_data)
+
+```
+
+## Run multiple liner regression model on table:
+This model uses TB = (Singles + 2xDoubles + 3xTriples + 4xHomeruns), BB, HBP, and SB to project runs by each team.
+The variables are a measure of the number of base runners.
+
+```{r}
+
+runs_fit = lm(R ~ TB + BB + HBP + SB, data = mlb_2019_data)
+summary(runs_fit)
+
+fitted(runs_fit)
+
+residuals(runs_fit)
+```
+
+#### The Adjusted R-squared measure for this model will give an indication as to how it performs.
+The adjusted R-squared value accounts for additional predictors that are added to the model as increasing variables will increase normal R-squared values.  In the above model, the adjusted R-squared value is 93.32%.  Thus the model is expected to explain 93.32% of variation in runs by the variables included.
+
+
+#### Display of regression diagnostics:
+Below are four diagrams to assess the above linear model.
+
+```{r}
+
+par(mfrow=c(2,2))
+plot(runs_fit, which = 1:4)
+
+```
+
+The Residuals vs. Fitted plot is a check for homoscedasticity and patterns would be exhibitied if this assumption failed. The plot shows that the residuals vary randomly around 0 and show no strong patterns based on 30 observations.
+
+The Normal Q-Q plot should track closely with the y=x line, there appear to be some issues in the tail, which may call the normality assumption into question. However, as only 30 observations are considered, there will be a bit more variability.
+
+The Scale-Location chart is a check for homoscedasticity and we are looking to ensure there are no extreme patterns. There do not appear to be any in this model.
+
+Cook's Distance chart shows that observation 10 is larger than other observations, but it still remains below 1.00. This observation may require further investigation as the model seems to do a poor job in projecting the final runs for the season.
+
+**Based on these regression diagnostics and the adjusted R-squared value, the model does a relatively good job in projecting the total runs by each team for a season.**
+
+#### p-Values for examining coefficients:
+Three of the 5 coefficients (including the intercept) in the model are significant at p=0.05. These variables are: intercept, total bases (TB), and walks (BB). 
+
+One of the coefficients, stolen bases (SB), was just outside of this range at p=0.0635 and is significant at p=0.10.
+
+The remaining coefficient, hit-by-pitch (HBP), was not significant with a p-value of 0.3875 and can be removed from the model.
