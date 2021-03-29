@@ -1,0 +1,216 @@
+---
+title: "Homework 3 - NFL Field Goals"
+author: "Anthony Stachowski, Brian Krupa, Rory Kelly"
+date: "4/12/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Import Field Goal Data Set
+As instructed we will use the set of field goals that have been reduced from the original set of ~14,000.
+This file includes an additional variable that has field surface indicated as field or turf, this was assessed using information from Wikipedia on the surface type for each field during each season (https://en.wikipedia.org/wiki/Chronology_of_home_stadiums_for_current_National_Football_League_teams).
+
+
+```{r, message=FALSE}
+library(readr)
+library(dplyr)
+
+url = "https://raw.githubusercontent.com/AS-72/Sports-Analytics/master/fieldGoalData2000-2013.csv"
+
+reducedData = read_csv(url)
+
+glimpse(reducedData)
+
+```
+
+Conduct some variable adjustment for use in later models:
+```{r}
+
+# Turn the variable iced into a factor variable to ensure the logistic regression accounts for it properly:
+reducedData$iced = as.factor(reducedData$iced)
+
+# For wspd variable where nulls are present, these will be assigned 0:
+
+reducedData$wspd[is.na(reducedData$wspd)] = 0
+
+# For temp variable where nulls are present, these will be assigned a temperature of 60 degrees (equates to not cold):
+
+reducedData$temp[is.na(reducedData$temp)] = 60
+
+# Create variables for a cold indicator (temp<=50 will be 1), wind indicator (wspd>=10 will be 1), turf indicator (surface=turf will be 1), and a variable for whether the field goal was good ("Y"=1):
+
+reducedData = reducedData %>%
+  mutate(cold = ifelse(temp <= 50, 1, 0)) %>%
+  mutate(wind = ifelse(wspd >= 10, 1, 0)) %>%
+  mutate(field = ifelse(surface=="Turf",1,0)) %>%
+  mutate(good = ifelse(good=="Y",1,0))
+
+# Convert new variables to factors:
+
+reducedData$cold = as.factor(reducedData$cold)
+reducedData$wind = as.factor(reducedData$wind)
+reducedData$field = as.factor(reducedData$field)
+  
+glimpse(reducedData)
+```
+
+
+## Question 1: Sort out ReducedData
+Divide the data set into training (70%) and test (30%)
+
+Determine how many rows correspnds to 70% of the data set, rounding down:
+```{r}
+sampleSize = floor(0.70*nrow(reducedData))
+
+sampleSize
+```
+
+Identify row indices for building a training set and then being able to identify test set:
+```{r}
+
+set.seed(123)
+trainingIndicator = sample(seq_len(nrow(reducedData)),size = sampleSize)
+
+trainingSet = reducedData[trainingIndicator,]
+testSet = reducedData[-trainingIndicator,]
+```
+
+
+## Question 2: Perform Logistic Regression
+Response Variable: good (binary variable where Yes = 1 and No = 0)
+
+Predictors: dist (fg distance), seas (season), week, iced (was the kicker "iced" with a time out?)
+
+```{r}
+
+# Run logistic regression using the variables specified above:
+logisticRegressionFG1 = glm(good ~ dist + seas + week + iced, data = trainingSet, family = binomial(link = "logit"))
+
+summary(logisticRegressionFG1)
+
+```
+
+## Question 3: Build Another Logistic Regression
+Response Variable: good (binary variable where Yes = 1 and No = 0)
+
+As iced in the above model was not significant, it will be dropped.
+
+Predictors: dist (fg distance), seas (season), week, cold (binary variable: ">50" = 0, "<=50" = 1), wind (binary variable: ">=10" = 1, "<10" = 0), field (binary variable: turf = 1, grass = 0)
+
+```{r}
+
+# Run logistic regression using the variables specified above:
+logisticRegressionFG2 = glm(good ~ dist + seas + week + cold + wind + field, data = trainingSet, family = binomial(link = "logit"))
+
+summary(logisticRegressionFG2)
+```
+
+In this new model, the "cold", "wind", and "field" variables are all statistically significant at the p=0.01 level ("cold" and "wind" are significant at p=0.001 level).
+
+The variable "week" is no longer significant, which makes some sense, as some of the new variables included would capture differences that "week" had previously captured.  For example, the weather in most cities gets colder as the season goes on and therefore including the variable "cold" will capture some of what "week" had previously captured.
+
+## Question 4: Create a confusion matrix
+Evaluate models for error rates, false positive, and false negative rates.
+Cutoff values of 0.4, 0.5, and 0.6 will be used.
+
+```{r}
+library(caret)
+
+testSet$good = as.factor(testSet$good)
+
+# Applying models to the test sets:
+
+## Utilizing model 1 from Question 2:
+test1 = predict(logisticRegressionFG1, newdata = testSet, type = "response")
+## Utilizing model 2 from Question 3:
+test2 = predict(logisticRegressionFG2, newdata = testSet, type = "response")
+
+
+# 40% level
+
+## Model 1:
+test1_40 = ifelse(test1>0.4,1,0)
+test1_40 = as.factor(test1_40)
+## Model 2:
+test2_40 = ifelse(test2>0.4,1,0)
+test2_40 = as.factor(test2_40)
+
+# 50% level
+
+## Model 1:
+test1_50 = ifelse(test1>0.5,1,0)
+test1_50 = as.factor(test1_50)
+## Model 2:
+test2_50 = ifelse(test2>0.5,1,0)
+test2_50 = as.factor(test2_50)
+
+# 60% level
+
+## Model 1:
+test1_60 = ifelse(test1>0.6,1,0)
+test1_60 = as.factor(test1_60)
+## Model 2:
+test2_60 = ifelse(test2>0.6,1,0)
+test2_60 = as.factor(test2_60)
+
+
+# Creating confusion matrix at 0.4 level:
+
+## Model 1:
+confusionMatrix(test1_40, testSet$good)
+
+# Creating confusion matrix at 0.4 level:
+
+## Model 2:
+confusionMatrix(test2_40, testSet$good)
+
+# Creating confusion matrix at 0.5 level:
+
+## Model 1:
+confusionMatrix(test1_50, testSet$good)
+
+# Creating confusion matrix at 0.5 level:
+
+## Model 2:
+confusionMatrix(test2_50, testSet$good)
+
+# Creating confusion matrix at 0.6 level:
+
+## Model 1:
+confusionMatrix(test1_60, testSet$good)
+
+# Creating confusion matrix at 0.6 level:
+
+## Model 2:
+confusionMatrix(test2_60, testSet$good)
+
+```
+
+### *While we created a confusion matrix for each model and at three different levels, we will provide some summary information for both models at the 50% level:*
+
+#### Model 1 from Question 2:
+
+Of the 4,006 events in the test set, the proposed model predicted correctly that the field goal was made in 3,230 events and predicted correctly that the field goal was missed in 53 events.
+
+The model predicted the field goal would be made in 692 events, but the field goal was actually missed (false positive). This leads to a false positive rate of 92.9% (Predicted to Make when actually missed / Total Actual Misses = 692 / (692 + 53)).
+
+The model predicted the field goal would be missed in 31 events, but it was actually made (false negative). This leas to a false negative rate of 1.0% (Predicted to Miss when actually made / Total Actual Makes = 31 / (31 + 3230)).
+
+This leads to an error rate of 18.0% ((False Positive + False Negative) / Total Events = (692 + 31) / 4006).
+
+
+#### Model 2 from Question 3:
+
+Of the 4,006 events in the test set, the proposed model predicted correctly that the field goal was made in 3,221 events and predicted correctly that the field goal was missed in 62 events.
+
+The model predicted the field goal would be made in 683 events, but the field goal was actually missed (false positive).  This leads to a false positive rate of 91.7% (Predicted to Make when actually missed / Total Actual Misses = 683 / (683 + 62))
+
+The model predicted the field goal would be missed in 40 events, but it was actually made (false negative). This leas to a false negative rate of 1.2% (Predicted to Miss when actually made / Total Actual Makes = 40 / (40 + 3221)).
+
+This leads to an error rate of 18.0% ((False Positive + False Negative) / Total Events = (683 + 40) / 4006).
+
+
+**Thus, at the 50% level both models have a similar error rate.  There are slight differences in false positive and false negative rates.**
